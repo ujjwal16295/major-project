@@ -3,13 +3,13 @@ import joblib
 import pandas as pd
 import re
 import secrets
+import gdown
 from urllib.parse import urlparse
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime, timezone
-from google_drive_downloader import GoogleDriveDownloader as gdd
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -40,11 +40,12 @@ app = Flask(__name__)
 CORS(app)
 
 # Google Drive Model Download
-MODEL_PATH = "random_forest_model.pkl"
+MODEL_PATH = "model/random_forest_model.pkl"
 GOOGLE_DRIVE_FILE_ID = os.getenv("GOOGLE_DRIVE_FILE_ID")
 
 if not os.path.exists(MODEL_PATH):
-    gdd.download_file_from_google_drive(file_id=GOOGLE_DRIVE_FILE_ID, dest_path=MODEL_PATH, unzip=False)
+    os.makedirs("model", exist_ok=True)
+    gdown.download(f"https://drive.google.com/uc?id={GOOGLE_DRIVE_FILE_ID}", MODEL_PATH, quiet=False)
 
 # Load Model
 model = joblib.load(MODEL_PATH)
@@ -161,4 +162,4 @@ def classify_url():
     return jsonify({"url": url, "classification": result})
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)
