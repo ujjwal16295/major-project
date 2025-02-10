@@ -1,6 +1,6 @@
 Flask
 Flask-Cors
-google_drive_downloader
+gdown
 pandas
 joblib
 scikit-learn
