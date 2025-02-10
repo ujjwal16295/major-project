@@ -3,6 +3,6 @@ Flask-Cors
 gdown
 pandas
 joblib
-scikit-learn
+scikit-learn==1.5.2
 firebase-admin
 python-dotenv
