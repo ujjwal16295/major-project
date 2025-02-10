@@ -3,6 +3,5 @@ Flask-Cors
 google_drive_downloader
 pandas
 joblib
-scikit-learn
 firebase-admin
 python-dotenv
