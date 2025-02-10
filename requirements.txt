@@ -1,7 +1,7 @@
 Flask
 Flask-Cors
-firebase-admin
-pandas
 joblib
-google_drive_downloader
+pandas
+firebase-admin
 python-dotenv
+gdown
