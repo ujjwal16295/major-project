@@ -446,12 +446,15 @@ def classify_url():
         prediction = xgb_model.predict(feature_df)[0]
         probability = xgb_model.predict_proba(feature_df)[0]
 
-        # Format the result
+        # Format the result - convert NumPy types to Python native types
+        is_phishing = bool(prediction == 0)  # Convert np.bool_ to Python bool
+        confidence = float(probability[0 if is_phishing else 1])  # Convert np.float to Python float
+
         result = {
             "url": url,
-            "is_phishing": prediction == 0,
-            "confidence": float(probability[0 if prediction == 0 else 1]),
-            "classification": "PHISHING" if prediction == 0 else "LEGITIMATE"
+            "is_phishing": is_phishing,
+            "confidence": confidence,
+            "classification": "PHISHING" if is_phishing else "LEGITIMATE"
         }
 
         return jsonify(result)
