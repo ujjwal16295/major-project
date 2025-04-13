@@ -485,7 +485,7 @@ def classify_url_simple():
         prediction = xgb_model.predict(feature_df)[0]
 
         # Format the result similar to the second code example
-        is_safe = prediction != 0  # 0 is phishing (not safe)
+        is_safe = bool(prediction != 0)  # Convert np.bool_ to Python bool # 0 is phishing (not safe)
         threat_category = "phishing" if prediction == 0 else "legitimate"
 
         result = {
