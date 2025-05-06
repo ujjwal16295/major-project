@@ -582,7 +582,7 @@ def classify_url_simple():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/predictmodel', methods=['POST'])
-def classify_url():
+def classify_url_model():
     """API endpoint for URL classification with authentication."""
     try:
         if xgb_model is None:
@@ -631,7 +631,7 @@ def classify_url():
 
 
 @app.route('/predicturlmodel', methods=['POST'])
-def classify_url_simple():
+def classify_url_simple_model():
     """Simplified API endpoint for URL classification without authentication."""
     try:
         if xgb_model is None:
