@@ -542,7 +542,7 @@ def classify_url():
             "url": url,
             "is_phishing": not is_safe,  # Invert is_safe
             "confidence": confidence,
-            "classification": "PHISHING" if not is_safe else "LEGITIMATE"
+            "classification": "UNSAFE" if not is_safe else "LEGITIMATE"
         }
         
         return jsonify(result)
@@ -565,6 +565,10 @@ def classify_url_simple():
         # If the URL is safe, replace threat categories with "legitimate"
         if is_safe:
             threat_categories = ["legitimate"]
+        else:
+            threat_categories = ["unsafe"]
+
+            
         
         # Format result exactly like original response
         result = {
@@ -576,6 +580,95 @@ def classify_url_simple():
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/predictmodel', methods=['POST'])
+def classify_url():
+    """API endpoint for URL classification with authentication."""
+    try:
+        if xgb_model is None:
+            return jsonify({"error": "Model not loaded"}), 500
+
+        data = request.get_json()
+        email = data.get("email", "").strip()
+        api_key = data.get("api_key", "").strip()
+        url = data.get("url", "").strip()
+
+        if not email or not api_key or not url:
+            return jsonify({"error": "Email, API key, and URL are required"}), 400
+
+        # Verify API Key, Check Daily Limit, and Increment Usage
+        is_valid, error_message = verify_api_key(email, api_key)
+        if not is_valid:
+            return jsonify({"error": error_message}), 403
+
+        # Extract features for prediction
+        feature_names = ['Have_IP', 'Have_At', 'URL_Length', 'URL_Depth', 'Redirection',
+                         'https_Domain', 'TinyURL', 'Prefix/Suffix', 'DNS_Record', 'Web_Traffic',
+                         'Domain_Age', 'Domain_End', 'iFrame', 'Mouse_Over', 'Right_Click', 'Web_Forwards']
+
+        features = featureExtraction(url)
+        feature_df = pd.DataFrame([features], columns=feature_names)
+
+        # Make prediction
+        prediction = xgb_model.predict(feature_df)[0]
+        probability = xgb_model.predict_proba(feature_df)[0]
+
+        # Format the result - convert NumPy types to Python native types
+        is_phishing = bool(prediction == 0)  # Convert np.bool_ to Python bool
+        confidence = float(probability[0 if is_phishing else 1])  # Convert np.float to Python float
+
+        result = {
+            "url": url,
+            "is_phishing": is_phishing,
+            "confidence": confidence,
+            "classification": "UNSAFE" if is_phishing else "LEGITIMATE"
+        }
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/predicturlmodel', methods=['POST'])
+def classify_url_simple():
+    """Simplified API endpoint for URL classification without authentication."""
+    try:
+        if xgb_model is None:
+            return jsonify({"error": "Model not loaded"}), 500
+
+        data = request.get_json()
+        url = data.get("url", "").strip()
+
+        if not url:
+            return jsonify({"error": "URL is required"}), 400
+
+        # Extract features for prediction
+        feature_names = ['Have_IP', 'Have_At', 'URL_Length', 'URL_Depth', 'Redirection',
+                         'https_Domain', 'TinyURL', 'Prefix/Suffix', 'DNS_Record', 'Web_Traffic',
+                         'Domain_Age', 'Domain_End', 'iFrame', 'Mouse_Over', 'Right_Click', 'Web_Forwards']
+
+        features = featureExtraction(url)
+        feature_df = pd.DataFrame([features], columns=feature_names)
+
+        # Make prediction
+        prediction = xgb_model.predict(feature_df)[0]
+
+        # Format the result similar to the second code example
+        is_safe = bool(prediction != 0)  # Convert np.bool_ to Python bool # 0 is phishing (not safe)
+        threat_category = "unsafe" if prediction == 0 else "legitimate"
+
+        result = {
+            "url": url,
+            "is_safe": is_safe,
+            "threat_categories": [threat_category],
+        }
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 
 # Simple status endpoint
