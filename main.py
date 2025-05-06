@@ -414,75 +414,108 @@ def verify_api_key(email, api_key):
     return True, None
 
 
-VIRUSTOTAL_API_KEY ="8b441511911852941deceb7c05cfb301f4fbe14e3b6b997f0e282135372feffd"
-VIRUSTOTAL_URL = 'https://www.virustotal.com/api/v3/urls'
-VIRUSTOTAL_REPORT_URL = 'https://www.virustotal.com/api/v3/analyses/'
+# VirusTotal API configuration
+VIRUSTOTAL_API_KEY = "8b441511911852941deceb7c05cfb301f4fbe14e3b6b997f0e282135372feffd"
 
-def check_url_with_virustotal(url):
+def check_url_safety(url, api_key):
     """
-    Check a URL using the VirusTotal API
-    Returns a tuple of (is_safe, confidence)
+    Check if a URL is safe using the VirusTotal API.
+
+    Args:
+        url (str): The URL to check
+        api_key (str): Your VirusTotal API key
+
+    Returns:
+        tuple: (is_safe, confidence, threat_categories)
     """
-    if not VIRUSTOTAL_API_KEY:
-        return False, 0.5  # Default to medium confidence if no API key
-    
     try:
-        # Submit URL for scanning
+        # Set up API headers
         headers = {
-            "x-apikey": VIRUSTOTAL_API_KEY
+            "accept": "application/json",
+            "x-apikey": api_key,
+            "content-type": "application/x-www-form-urlencoded"
         }
-        data = {"url": url}
-        response = requests.post(VIRUSTOTAL_URL, headers=headers, data=data)
-        
-        if response.status_code != 200:
-            return False, 0.5  # Default to medium confidence if API error
-        
-        # Get analysis ID
-        result = response.json()
-        analysis_id = result.get('data', {}).get('id')
-        
-        if not analysis_id:
-            return False, 0.5  # Default to medium confidence if no analysis ID
-        
-        # Poll for results (with timeout)
-        max_attempts = 5
-        for _ in range(max_attempts):
-            # Wait for VirusTotal to process
-            time.sleep(2)
-            
-            # Get analysis results
-            report_url = f"{VIRUSTOTAL_REPORT_URL}{analysis_id}"
-            report_response = requests.get(report_url, headers=headers)
-            
-            if report_response.status_code != 200:
-                continue
+
+        # Step 1: Submit URL for scanning
+        payload = {"url": url}
+        submission_response = requests.post(
+            "https://www.virustotal.com/api/v3/urls",
+            data=payload,
+            headers=headers
+        )
+        submission_data = submission_response.json()
+
+        # Extract the URL ID from the response
+        if 'data' not in submission_data or 'id' not in submission_data['data']:
+            return False, 0.7, ["Error: Failed to submit URL for analysis"]
+
+        url_id = submission_data['data']['id']
+
+        # Step 2: Get analysis results
+        analysis_url = f"https://www.virustotal.com/api/v3/analyses/{url_id}"
+
+        # Wait for analysis to complete - might need to retry a few times
+        max_retries = 3
+        wait_time = 5  # seconds
+
+        for attempt in range(max_retries):
+            analysis_response = requests.get(analysis_url, headers=headers)
+            analysis_data = analysis_response.json()
+
+            # Check if analysis is completed
+            if ('data' in analysis_data and
+                    'attributes' in analysis_data['data'] and
+                    'status' in analysis_data['data']['attributes'] and
+                    analysis_data['data']['attributes']['status'] == 'completed'):
+                break
+
+            # Wait before retrying
+            if attempt < max_retries - 1:
+                time.sleep(wait_time)
+
+        # Process results to determine safety
+        is_safe = True
+        threat_categories = []
+        confidence = 0.5  # Default confidence
+
+        if ('data' in analysis_data and
+                'attributes' in analysis_data['data']):
                 
-            report = report_response.json()
-            attributes = report.get('data', {}).get('attributes', {})
-            status = attributes.get('status')
-            
-            if status == 'completed':
-                # Check results
-                stats = attributes.get('stats', {})
+            # Get stats for confidence calculation
+            if 'stats' in analysis_data['data']['attributes']:
+                stats = analysis_data['data']['attributes']['stats']
+                total_engines = sum(stats.values()) if stats else 0
                 malicious = stats.get('malicious', 0)
                 suspicious = stats.get('suspicious', 0)
-                total = sum(stats.values()) if stats else 1
                 
-                # Consider URL unsafe if any engine finds it malicious or suspicious
-                is_safe = malicious == 0 and suspicious == 0
+                if total_engines > 0:
+                    if malicious + suspicious > 0:
+                        is_safe = False
+                        confidence = min(0.99, 0.5 + 0.5 * ((malicious + suspicious) / total_engines))
+                    else:
+                        confidence = min(0.99, 0.5 + 0.5 * (stats.get('harmless', 0) / total_engines))
+            
+            # Check for threat categories from results
+            if 'results' in analysis_data['data']['attributes']:
+                results = analysis_data['data']['attributes']['results']
                 
-                # Calculate confidence based on ratio of detections
-                if is_safe:
-                    confidence = 0.5 + (0.5 * (stats.get('harmless', 0) / total if total > 0 else 0.5))
-                else:
-                    confidence = 0.5 + (0.5 * ((malicious + suspicious) / total if total > 0 else 0.5))
-                
-                return is_safe, min(0.99, confidence)  # Cap at 0.99
-        
-        return False, 0.5  # Default to medium confidence if timeout
-    
+                # Check for malicious/suspicious verdicts from engines
+                for engine, result in results.items():
+                    if 'category' in result and result['category'] in ['malicious', 'suspicious']:
+                        is_safe = False
+                        if 'result' in result and result['result'] not in threat_categories:
+                            threat_categories.append(result['result'])
+
+        # If no specific threat categories were found but URL is not safe,
+        # add a generic "phishing" category
+        if not is_safe and not threat_categories:
+            threat_categories = ["phishing"]
+
+        return is_safe, confidence, threat_categories
+
     except Exception as e:
-        return False, 0.5  # Default to medium confidence if error
+        return False, 0.7, [f"Error: {str(e)}"]
+
 
 @app.route('/predict', methods=['POST'])
 def classify_url():
@@ -502,12 +535,12 @@ def classify_url():
             return jsonify({"error": error_message}), 403
         
         # Check with VirusTotal
-        is_safe, confidence = check_url_with_virustotal(url)
+        is_safe, confidence, _ = check_url_safety(url, VIRUSTOTAL_API_KEY)
         
         # Format result exactly like original response
         result = {
             "url": url,
-            "is_phishing": not is_safe,  # Invert is_safe to get is_phishing
+            "is_phishing": not is_safe,  # Invert is_safe
             "confidence": confidence,
             "classification": "PHISHING" if not is_safe else "LEGITIMATE"
         }
@@ -527,15 +560,17 @@ def classify_url_simple():
             return jsonify({"error": "URL is required"}), 400
         
         # Check with VirusTotal
-        is_safe, _ = check_url_with_virustotal(url)
+        is_safe, _, threat_categories = check_url_safety(url, VIRUSTOTAL_API_KEY)
+        
+        # If the URL is safe, replace threat categories with "legitimate"
+        if is_safe:
+            threat_categories = ["legitimate"]
         
         # Format result exactly like original response
-        threat_category = "legitimate" if is_safe else "phishing"
-        
         result = {
             "url": url,
             "is_safe": is_safe,
-            "threat_categories": [threat_category]
+            "threat_categories": threat_categories
         }
         
         return jsonify(result)
